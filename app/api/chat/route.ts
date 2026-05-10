@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
   try {
     const { question } = await req.json();
 
+    // FREE embeddings
     const embeddings =
       new HuggingFaceTransformersEmbeddings({
         model: "Xenova/all-MiniLM-L6-v2",
@@ -33,24 +34,26 @@ export async function POST(req: NextRequest) {
         }
       );
 
-    const retriever = vectorStore.asRetriever({
-      k: 3,
-    });
+    const retriever =
+      vectorStore.asRetriever({
+        k: 3,
+      });
 
     const searchedChunks =
       await retriever.invoke(question);
 
+    // Groq
     const model = new ChatGroq({
       apiKey: process.env.GROQ_API_KEY!,
-       model: "llama-3.3-70b-versatile",
+      model: "llama-3.3-70b-versatile",
     });
 
     const systemPrompt = `
 You are an AI assistant.
 
-Answer ONLY using the provided PDF context.
+Answer ONLY from the provided PDF context.
 
-If answer is not found,
+If the answer is not present,
 say:
 "I could not find this information in the uploaded PDF."
 
@@ -58,10 +61,11 @@ Context:
 ${JSON.stringify(searchedChunks)}
 `;
 
-    const response = await model.invoke([
-      new SystemMessage(systemPrompt),
-      new HumanMessage(question),
-    ]);
+    const response =
+      await model.invoke([
+        new SystemMessage(systemPrompt),
+        new HumanMessage(question),
+      ]);
 
     return NextResponse.json({
       success: true,
@@ -69,7 +73,11 @@ ${JSON.stringify(searchedChunks)}
     });
 
   } catch (error: any) {
-    console.error("CHAT_ERROR:", error);
+
+    console.error(
+      "CHAT_ERROR:",
+      error
+    );
 
     return NextResponse.json(
       {

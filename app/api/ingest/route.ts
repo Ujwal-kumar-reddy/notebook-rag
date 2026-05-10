@@ -6,7 +6,7 @@ import { HuggingFaceTransformersEmbeddings } from "@langchain/community/embeddin
 
 import { PGVectorStore } from "@langchain/community/vectorstores/pgvector";
 
-import PDFParser from "pdf2json";
+const pdf = require("pdf-parse");
 
 export async function POST(req: NextRequest) {
   try {
@@ -21,37 +21,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Convert file to buffer
     const bytes = await file.arrayBuffer();
 
     const buffer = Buffer.from(bytes);
 
-    // Parse PDF
-    const pdfParser = new PDFParser();
+    const parsed = await pdf(buffer);
 
-    const text: string = await new Promise(
-      (resolve, reject) => {
-        pdfParser.on(
-          "pdfParser_dataError",
-          (errData: any) =>
-            reject(errData.parserError)
-        );
+    const text = parsed.text;
 
-        pdfParser.on(
-          "pdfParser_dataReady",
-          () => {
-            const rawText =
-              pdfParser.getRawTextContent();
-
-            resolve(rawText);
-          }
-        );
-
-        pdfParser.parseBuffer(buffer);
-      }
-    );
-
-    // Split into chunks
     const splitter =
       new RecursiveCharacterTextSplitter({
         chunkSize: 1000,
@@ -61,13 +38,21 @@ export async function POST(req: NextRequest) {
     const docs =
       await splitter.createDocuments([text]);
 
-    // Embeddings
+    // FREE local embeddings
     const embeddings =
       new HuggingFaceTransformersEmbeddings({
         model: "Xenova/all-MiniLM-L6-v2",
       });
 
-    // Store vectors
+    // DEBUG
+    const test =
+      await embeddings.embedQuery("hello");
+
+    console.log(
+      "EMBEDDING LENGTH:",
+      test.length
+    );
+
     await PGVectorStore.fromDocuments(
       docs,
       embeddings,
@@ -88,6 +73,7 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error: any) {
+
     console.error(
       "INGEST_ERROR:",
       error
