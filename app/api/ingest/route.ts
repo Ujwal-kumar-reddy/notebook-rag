@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
+
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+
 import { HuggingFaceTransformersEmbeddings } from "@langchain/community/embeddings/huggingface_transformers";
+
 import { PGVectorStore } from "@langchain/community/vectorstores/pgvector";
 
-import fs from "fs";
-import path from "path";
+import PDFParser from "pdf2json";
 
 export async function POST(req: NextRequest) {
   try {
@@ -20,60 +21,77 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Convert file to buffer
     const bytes = await file.arrayBuffer();
 
     const buffer = Buffer.from(bytes);
 
-    const tempPath = path.join(process.cwd(), "temp.pdf");
+    // Parse PDF
+    const pdfParser = new PDFParser();
 
-    fs.writeFileSync(tempPath, buffer);
+    const text: string = await new Promise(
+      (resolve, reject) => {
+        pdfParser.on(
+          "pdfParser_dataError",
+          (errData: any) =>
+            reject(errData.parserError)
+        );
 
-    const loader = new PDFLoader(tempPath);
+        pdfParser.on(
+          "pdfParser_dataReady",
+          () => {
+            const rawText =
+              pdfParser.getRawTextContent();
 
-    const rawDocs = await loader.load();
+            resolve(rawText);
+          }
+        );
 
-    const splitter = new RecursiveCharacterTextSplitter({
-      chunkSize: 1000,
-      chunkOverlap: 200,
-    });
+        pdfParser.parseBuffer(buffer);
+      }
+    );
 
-    const docs = await splitter.splitDocuments(rawDocs);
+    // Split into chunks
+    const splitter =
+      new RecursiveCharacterTextSplitter({
+        chunkSize: 1000,
+        chunkOverlap: 200,
+      });
 
-    // FREE HUGGINGFACE EMBEDDINGS
+    const docs =
+      await splitter.createDocuments([text]);
+
+    // Embeddings
     const embeddings =
       new HuggingFaceTransformersEmbeddings({
         model: "Xenova/all-MiniLM-L6-v2",
       });
 
-    const testEmbedding =
-      await embeddings.embedQuery("hello");
-
-    console.log(
-      "TEST EMBEDDING LENGTH:",
-      testEmbedding.length
-    );
-
+    // Store vectors
     await PGVectorStore.fromDocuments(
       docs,
       embeddings,
       {
         postgresConnectionOptions: {
-          connectionString: process.env.DATABASE_URL!,
+          connectionString:
+            process.env.DATABASE_URL!,
         },
 
         tableName: "documents",
       }
     );
 
-    fs.unlinkSync(tempPath);
-
     return NextResponse.json({
       success: true,
-      message: "Document Processed Successfully",
+      message:
+        "Document indexed successfully",
     });
 
   } catch (error: any) {
-    console.error("INGEST_ERROR:", error);
+    console.error(
+      "INGEST_ERROR:",
+      error
+    );
 
     return NextResponse.json(
       {
